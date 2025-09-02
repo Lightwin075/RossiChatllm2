@@ -1,0 +1,441 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum SupplierType {
+  CONTRACT    // Por contrato
+  RECURRING   // Recurrente
+}
+
+enum StorageType {
+  BULK        // A granel
+  BATCH       // Por lotes
+}
+
+enum MovementType {
+  IN          // Entrada
+  OUT         // Salida
+}
+
+enum OrderStatus {
+  PRE_ORDER   // Pre-orden
+  ISSUED      // Emitida
+  RECEIVED    // Recibida
+  PAID        // Pagada
+}
+
+enum PaymentStatus {
+  UNPAID      // No pagado
+  PAID        // Pagado
+}
+
+enum ProductionStatus {
+  PRE_PRODUCTION  // Pre-producción
+  IN_PROGRESS     // En producción
+  FINISHED        // Finalizado
+}
+
+enum NotificationType {
+  LOW_STOCK       // Bajo stock
+  EXPIRING        // Próximo vencimiento
+  PAYMENT_DUE     // Pago pendiente
+  CUSTOM          // Recordatorio manual
+}
+
+enum RoleType {
+  SUPER_ADMIN
+  ADMIN
+  WAREHOUSE
+  PRODUCTION
+  CUSTOM
+}
+
+// Auth and Users
+model User {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  password        String
+  firstName       String
+  lastName        String
+  phone           String?
+  isActive        Boolean  @default(true)
+  roleId          String
+  role            Role     @relation(fields: [roleId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  lastLogin       DateTime?
+
+  // Relations
+  auditLogs       AuditLog[]
+  notifications   Notification[]
+  inventoryMovements InventoryMovement[]
+  productionOrders   ProductionOrder[]
+  payments           Payment[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  type        RoleType
+  permissions Json      // Stored as JSON for flexibility
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  users       User[]
+
+  @@map("roles")
+}
+
+// Catálogos básicos
+model ProductType {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  products    Product[]
+
+  @@map("product_types")
+}
+
+model Warehouse {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  location    String?
+  responsible String?
+  capacity    Decimal?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  inventoryMovements InventoryMovement[]
+  batches            Batch[]
+
+  @@map("warehouses")
+}
+
+model Employee {
+  id          String    @id @default(cuid())
+  firstName   String
+  lastName    String
+  position    String
+  email       String?
+  phone       String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  inventoryMovements InventoryMovement[]
+  productionOrders   ProductionOrder[]
+
+  @@map("employees")
+}
+
+model PaymentType {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  payments    Payment[]
+
+  @@map("payment_types")
+}
+
+model WeighingType {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("weighing_types")
+}
+
+// Proveedores
+model Supplier {
+  id              String       @id @default(cuid())
+  type            SupplierType
+  name            String
+  ruc             String       @unique
+  address         String?
+  email           String
+  phones          String[]     // Array of phone numbers
+  contacts        Json?        // Array of contact objects {name, position, phone, email}
+  categories      String[]     // Array of category IDs
+  
+  // Contrato fields (only for CONTRACT type)
+  contractNumber  Int?         @unique
+  contractFile    String?      // Path to PDF file
+  contractStart   DateTime?
+  deliveryFreq    String?      // weekly, biweekly, monthly
+  
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // Relations
+  products        SupplierProduct[]
+  purchaseOrders  PurchaseOrder[]
+
+  @@map("suppliers")
+}
+
+model Product {
+  id                String      @id @default(cuid())
+  name              String
+  code              String      @unique
+  productTypeId     String
+  productType       ProductType @relation(fields: [productTypeId], references: [id])
+  unit              String      // kg, lt, unit, etc.
+  storageType       StorageType
+  requiresExpiry    Boolean     @default(false)
+  minStock          Decimal?
+  description       String?
+  isActive          Boolean     @default(true)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  // Relations
+  suppliers         SupplierProduct[]
+  purchaseOrderItems PurchaseOrderItem[]
+  inventoryMovements InventoryMovement[]
+  batches           Batch[]
+  recipeItems       RecipeItem[]
+  recipes           Recipe[]
+  productionOrders  ProductionOrder[]
+
+  @@map("products")
+}
+
+model SupplierProduct {
+  id         String   @id @default(cuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([supplierId, productId])
+  @@map("supplier_products")
+}
+
+// Órdenes de compra
+model PurchaseOrder {
+  id                String        @id @default(cuid())
+  orderNumber       Int           @unique @default(autoincrement())
+  supplierId        String
+  supplier          Supplier      @relation(fields: [supplierId], references: [id])
+  status            OrderStatus   @default(PRE_ORDER)
+  paymentStatus     PaymentStatus @default(UNPAID)
+  
+  creationDate      DateTime      @default(now())
+  estimatedArrival  DateTime
+  paymentDate       DateTime?
+  
+  subtotal          Decimal       @default(0)
+  taxRate           Decimal       @default(15)
+  taxAmount         Decimal       @default(0)
+  total             Decimal       @default(0)
+  
+  emailSent         Boolean       @default(false)
+  whatsappSent      Boolean       @default(false)
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  items             PurchaseOrderItem[]
+  payments          Payment[]
+
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product       @relation(fields: [productId], references: [id])
+  quantity        Decimal
+  unitCost        Decimal
+  subtotal        Decimal       // quantity * unitCost
+  createdAt       DateTime      @default(now())
+
+  @@map("purchase_order_items")
+}
+
+// Inventario y movimientos
+model Batch {
+  id              String    @id @default(cuid())
+  code            String    @unique // PRODUCT_CODE + CREATION_DATE + BATCH_NUMBER
+  productId       String
+  product         Product   @relation(fields: [productId], references: [id])
+  warehouseId     String
+  warehouse       Warehouse @relation(fields: [warehouseId], references: [id])
+  batchNumber     Int
+  initialQuantity Decimal
+  currentQuantity Decimal
+  creationDate    DateTime  @default(now())
+  expiryDate      DateTime?
+  qrCode          String?   // Base64 encoded QR
+  description     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  inventoryMovements InventoryMovement[]
+
+  @@map("batches")
+}
+
+model InventoryMovement {
+  id            String       @id @default(cuid())
+  type          MovementType
+  productId     String
+  product       Product      @relation(fields: [productId], references: [id])
+  warehouseId   String
+  warehouse     Warehouse    @relation(fields: [warehouseId], references: [id])
+  batchId       String?
+  batch         Batch?       @relation(fields: [batchId], references: [id])
+  quantity      Decimal
+  description   String?
+  employeeId    String?
+  employee      Employee?    @relation(fields: [employeeId], references: [id])
+  userId        String
+  user          User         @relation(fields: [userId], references: [id])
+  movementDate  DateTime     @default(now())
+  createdAt     DateTime     @default(now())
+
+  @@map("inventory_movements")
+}
+
+// Pagos
+model Payment {
+  id              String        @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  amount          Decimal
+  paymentDate     DateTime      @default(now())
+  description     String?
+  reference       String?       // Number, check, transfer reference
+  paymentTypeId   String
+  paymentType     PaymentType   @relation(fields: [paymentTypeId], references: [id])
+  receipt         String?       // Path to receipt file
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+  createdAt       DateTime      @default(now())
+
+  @@map("payments")
+}
+
+// Producción
+model Recipe {
+  id          String    @id @default(cuid())
+  productId   String    @unique
+  product     Product   @relation(fields: [productId], references: [id])
+  name        String
+  description String?
+  version     String    @default("1.0")
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  items       RecipeItem[]
+
+  @@map("recipes")
+}
+
+model RecipeItem {
+  id            String  @id @default(cuid())
+  recipeId      String
+  recipe        Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  ingredientId  String
+  ingredient    Product @relation(fields: [ingredientId], references: [id])
+  quantity      Decimal
+  unit          String
+  createdAt     DateTime @default(now())
+
+  @@map("recipe_items")
+}
+
+model ProductionOrder {
+  id                  String           @id @default(cuid())
+  orderNumber         Int              @unique @default(autoincrement())
+  productId           String
+  product             Product          @relation(fields: [productId], references: [id])
+  targetQuantity      Decimal
+  producedQuantity    Decimal?
+  status              ProductionStatus @default(PRE_PRODUCTION)
+  plannedFinishDate   DateTime
+  actualFinishDate    DateTime?
+  employeeId          String
+  employee            Employee         @relation(fields: [employeeId], references: [id])
+  userId              String
+  user                User             @relation(fields: [userId], references: [id])
+  notes               String?
+  finalNotes          String?
+  targetWarehouseId   String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  @@map("production_orders")
+}
+
+// Notificaciones
+model Notification {
+  id          String           @id @default(cuid())
+  type        NotificationType
+  title       String
+  message     String
+  userId      String?
+  user        User?            @relation(fields: [userId], references: [id])
+  isRead      Boolean          @default(false)
+  relatedId   String?          // ID of related entity (product, order, etc.)
+  relatedType String?          // Type of related entity
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@map("notifications")
+}
+
+// Auditoría
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  action      String   // CREATE, UPDATE, DELETE, LOGIN, etc.
+  tableName   String
+  recordId    String?
+  oldValues   Json?
+  newValues   Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@map("audit_logs")
+}
+
